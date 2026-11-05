@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Solad – PV-Laden</title>
+<style>
+  :root { color-scheme: light dark; --gelb:#e8a400; --gruen:#2e9e5b; --rot:#c8423b; --grau:#8884; }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 520px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  .info { color: #888; font-size: .9rem; min-height: 1.2em; }
+  .kacheln { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
+  .kachel { border: 1px solid var(--grau); border-radius: 12px; padding: 10px 12px; }
+  .kachel .t { font-size: .8rem; color: #888; }
+  .kachel .w { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .kachel .z { font-size: .8rem; color: #888; }
+  .modus { display: grid; gap: 8px; }
+  button { font-size: 1rem; padding: 14px; border-radius: 12px; border: 1px solid var(--grau);
+           background: transparent; color: inherit; cursor: pointer; text-align: left; }
+  button.aktiv { border: 2px solid var(--gelb); background: #e8a40022; font-weight: 600; }
+  .zeile { display: flex; gap: 8px; }
+  .zeile input { width: 5em; font-size: 1rem; padding: 10px; border-radius: 10px; border: 1px solid var(--grau); }
+  .zeile button { flex: 1; }
+  .fehler { color: var(--rot); }
+  footer { margin-top: 16px; font-size: .8rem; color: #888; }
+</style>
+</head>
+<body>
+<h1>☀️ Solad</h1>
+<div class="info" id="info">lädt …</div>
+
+<div class="kacheln">
+  <div class="kachel"><div class="t">PV</div><div class="w" id="pv">–</div></div>
+  <div class="kachel"><div class="t">Haus (ohne Auto)</div><div class="w" id="haus">–</div></div>
+  <div class="kachel"><div class="t">Hausspeicher</div><div class="w" id="soc">–</div><div class="z" id="speicher"></div></div>
+  <div class="kachel"><div class="t">Netz</div><div class="w" id="netz">–</div></div>
+  <div class="kachel"><div class="t">Auto</div><div class="w" id="auto">–</div><div class="z" id="wallbox"></div></div>
+  <div class="kachel"><div class="t">Geladen (diese Sitzung)</div><div class="w" id="geladen">–</div><div class="z" id="status"></div></div>
+</div>
+
+<div class="modus">
+  <button data-modus="pv">☀️ Nur PV-Überschuss</button>
+  <button data-modus="voll">⚡ Vollgas bis voll</button>
+  <div class="zeile">
+    <input id="kwh" type="number" min="1" max="100" step="1" value="10" aria-label="kWh">
+    <button data-modus="kwh">⚡ Vollgas, dann PV</button>
+  </div>
+  <button data-modus="aus">⏸ Pause</button>
+  <button data-modus="beobachten">👀 Nur beobachten (nicht eingreifen)</button>
+</div>
+
+<footer id="fuss"></footer>
+
+<script>
+const kw = w => (w / 1000).toFixed(1).replace(".", ",") + " kW";
+const $ = id => document.getElementById(id);
+
+async function aktualisieren() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    if (s.fehler) { $("info").innerHTML = `<span class="fehler">${s.fehler}</span>`; return; }
+    $("info").textContent = s.info;
+    $("pv").textContent = kw(s.pv_w);
+    $("haus").textContent = kw(s.haus_w);
+    $("soc").textContent = Math.round(s.speicher_soc) + " %";
+    $("speicher").textContent = (s.speicher_w > 50 ? "entlädt " + kw(s.speicher_w)
+                              : s.speicher_w < -50 ? "lädt " + kw(-s.speicher_w) : "ruht")
+                              + (s.speicher_gesperrt ? " · gesperrt 🔒" : "");
+    $("netz").textContent = s.netz_w > 50 ? "Bezug " + kw(s.netz_w)
+                          : s.netz_w < -50 ? "Einsp. " + kw(-s.netz_w) : "0";
+    $("auto").textContent = kw(s.auto_w);
+    const wb = s.wallbox;
+    $("wallbox").textContent = wb.pause ? "pausiert" : `${wb.phasen}-phasig, ${wb.strom_a} A`;
+    $("geladen").textContent = s.auto_geladen_kwh.toFixed(1).replace(".", ",") + " kWh";
+    $("status").textContent = s.auto_status;
+    document.querySelectorAll("[data-modus]").forEach(b =>
+      b.classList.toggle("aktiv", b.dataset.modus === s.modus));
+    $("fuss").textContent = `Stand ${s.zeit}` + (s.winter ? " · Winterregel: Hausspeicher zuerst" : "");
+  } catch (e) {
+    $("info").innerHTML = `<span class="fehler">Server nicht erreichbar</span>`;
+  }
+}
+
+document.querySelectorAll("[data-modus]").forEach(b => b.addEventListener("click", async () => {
+  const modus = b.dataset.modus;
+  if (modus === "voll" && !confirm("Vollgas laden aus PV + Netz? Der Hausspeicher wird solange stillgelegt.")) return;
+  const r = await fetch("/api/modus", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({modus, kwh: parseFloat($("kwh").value) || 0}),
+  });
+  if (!r.ok) alert((await r.json()).detail);
+  aktualisieren();
+}));
+
+aktualisieren();
+setInterval(aktualisieren, 5000);
+</script>
+</body>
+</html>

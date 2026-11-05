@@ -1,0 +1,11 @@
+# Zugangsdaten und Laufzeitdateien
+.env
+modus.json
+*.log
+# lokale Alt-Konfiguration (evcc) mit Geräteadressen
+evcc.yaml
+
+.venv/
+__pycache__/
+.pytest_cache/
+.DS_Store
